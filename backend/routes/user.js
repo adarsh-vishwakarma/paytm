@@ -3,6 +3,7 @@ const router = express.Router();
 const { User } = require("../db");
 const zod = require("zod");
 const jwt = require("jsonwebtoken");
+const { authMiddleware } = require("../middleware");
 require("dotenv").config();
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -84,5 +85,27 @@ router.post("/signin", async (req, res) => {
     message: "Error while logging in",
   });
 });
+
+const updateBody = zod.object({
+    password: zod.string().optional(),
+    firstName: zod.string().optional(),
+    lastName: zod.string().optional()
+})
+
+router.put("/", authMiddleware, async(req, res) => {
+    const parsed = updateBody.safeParse(req.body);
+    if(!parsed.success) {
+        res.status(411).json({
+            message: "Error while updating information"
+        })
+    }
+    const updates = parsed.data; // Extract validated data
+    await User.updateOne({ _id: req.userId }, { $set: updates });
+  
+
+    res.json({
+        message: "Updated successfully"
+    })
+})
 
 module.exports = router;
