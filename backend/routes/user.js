@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const { authMiddleware } = require("../middleware");
 require("dotenv").config();
 const JWT_SECRET = process.env.JWT_SECRET;
+const bcrypt = require('bcrypt');
 
 const signupBody = zod.object({
   username: zod.string().email(),
@@ -16,43 +17,48 @@ const signupBody = zod.object({
 
 router.post("/signup", async (req, res) => {
   const { username, password, firstName, lastName } = req.body;
-  const { success } = signupBody.safeParse(req.body);
+  const { success, error } = signupBody.safeParse(req.body);
+
+  // If inputs don't pass validation
   if (!success) {
-    return res.status(411).json({
-      message: "Email already taken / Incorrect inputs",
+    return res.status(400).json({
+      message: "Invalid input",
+      error: error?.issues || "Email already taken / Incorrect inputs",
     });
   }
 
+  // Check if user already exists
   const existingUser = await User.findOne({ username });
-
   if (existingUser) {
-    return res.status(411).json({
-      message: "Email already taken / Incorrect inputs",
+    return res.status(409).json({
+      message: "Email already taken",
     });
   }
+
+  // Hash the password
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  // Create the user
   const user = await User.create({
     username,
-    password,
+    password: hashedPassword,
     firstName,
     lastName,
   });
   const userId = user._id;
 
+  // Create associated account with random balance
   await Account.create({
     userId,
     balance: 1 + Math.random() * 10000,
   });
-  
-  const token = jwt.sign(
-    {
-      userId,
-    },
-    JWT_SECRET
-  );
+
+  // Generate JWT token
+  const token = jwt.sign({ userId }, JWT_SECRET);
 
   res.json({
     message: "User created successfully",
-    token: token,
+    token,
   });
 });
 
@@ -62,6 +68,7 @@ const signinBody = zod.object({
 });
 
 router.post("/signin", async (req, res) => {
+  console.log("hii")
   const { username, password } = req.body;
   const { success } = signinBody.safeParse(req.body);
   if (!success) {
@@ -115,24 +122,20 @@ router.put("/", authMiddleware, async (req, res) => {
 
 router.get("/bulk", async (req, res) => {
   const filter = req.query.filter || "";
-  console.log(filter);
+  
+  // Sanitize the input to avoid regex injection
+  const sanitizedFilter = filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Use case-insensitive regex
   const users = await User.find({
     $or: [
-      {
-        firstName: {
-          $regex: filter,
-        },
-      },
-      {
-        lastName: {
-          $regex: filter,
-        },
-      },
-    ],
+      { firstName: { $regex: sanitizedFilter, $options: "i" } },
+      { lastName: { $regex: sanitizedFilter, $options: "i" } }
+    ]
   });
-  console.log(users);
+
   res.json({
-    user: users.map((user) => ({
+    users: users.map((user) => ({
       username: user.username,
       firstName: user.firstName,
       lastName: user.lastName,
@@ -140,5 +143,6 @@ router.get("/bulk", async (req, res) => {
     })),
   });
 });
+
 
 module.exports = router;
